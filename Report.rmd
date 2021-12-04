@@ -1,0 +1,1345 @@
+---
+title: "Geostatistics Athens Week project"
+author: "Cihan Alan, Adrien Boitreaud, Raphaël Benerradi"
+date: "November 21, 2021"
+output: 
+    pdf_document:
+        number_sections: true
+        toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The Jura data set
+The Jura data set comprises seven heavy metals measured in the top soil of the swiss Jura, along with consistently coded land use and rock type factors, as well as geographic coordinates. 
+
+Variable description :
+
+* Xloc: X coordinate, local grid km
+* Yloc: Y coordinate, local grid km
+* Landuse: Land use: 1: Forest, 2: Pasture (Weide(land), Wiese, Grasland), 3: Meadow (Wiese, Flur, Matte, Anger), 4: Tillage (Ackerland, bestelltes Land)
+* Rock: Rock Types: 1: Argovian, 2: Kimmeridgian, 3: Sequanian, 4: Portlandian, 5: Quaternary.
+* Cd: mg cadmium kg^-1 topsoil
+* Co: mg cobalt kg^-1 topsoil
+* Cr: mg chromium kg^-1 topsoil
+* Cu: mg copper kg^-1 topsoil
+* Ni: mg nickel kg^-1 topsoil
+* Pb: mg lead kg^-1 topsoil
+* Zn: mg zinc kg^-1 topsoil
+
+You are given three different files:
+
+* jura_pred.csv: learning dataset
+* jura_grid.csv: prediction grid (contains locations and covariables)
+* jura_val_loc: validation locations and covariables
+
+# Exploratory analysis
+
+## Basic statistics
+1. load the dataset from jura_pred.csv (on the cloud)
+```{r,echo=T,results='hide'}
+#Adapt it to your folder location
+working_dir = "C:/Users/Raph/Documents/Ecole/7-DD Agro/3-Cours/3-UC & Athens/UC Athens Geostatistics"
+setwd(working_dir)
+#Data set
+jura_tot = read.csv("jura/jura_pred.csv")
+```
+2. What is the class of the dataset?
+```{r,eval=T}
+class(jura_tot)
+```
+3. What is the number of observations? What is the number of variables?
+```{r,eval=T}
+nrow(jura_tot) #Number of observations
+ncol(jura_tot) #Number of variables
+```
+4. Print the name of the variables.
+```{r,eval=T}
+names(jura_tot)
+```
+5. Compute the minimum and maximum value for each coordinate.
+```{r,eval=T}
+apply(jura_tot[,1:2],2,min) #Minimum of each coordinate
+apply(jura_tot[,1:2],2,max) #Maximum of each coordinate
+```
+6. Compute basic statistics for the seven different heavy metals (mean, min, max, quartiles and standard deviation)
+```{r,eval=T}
+summary(jura_tot[,5:11]) #Basic statistics of each heavy metals
+apply(jura_tot[,5:11],2,sd) #Std deviation of each heavy metals
+```
+7. Compute the mean of cobalt concentration for the four different landuses 
+```{r,eval=T}
+aggregate(Co~Landuse, data=jura_tot, mean)
+```
+
+## Graphical Representations
+1. Apply the plot function to the whole dataset
+```{r,eval=T}
+plot(jura_tot)
+```
+2. Plot the coordinates.
+```{r,eval=T, fig.align="center", fig.height=3.5, fig.width=5}
+plot(jura_tot$Xloc, jura_tot$Yloc)
+```
+3. On the same plot, display the points with landuse 2 (pasture) in red.
+```{r,eval=T, fig.align="center", fig.height=3.5, fig.width=5}
+plot(jura_tot$Xloc, jura_tot$Yloc)
+points(jura_tot$Xloc[jura_tot$Landuse=="2"],jura_tot$Yloc[jura_tot$Landuse=="2"], col='red')
+```
+4. Plot the seven heavy metal concentrations histograms.
+```{r,eval=T, fig.align="center", fig.height=3.5, fig.width=5}
+par(mfrow=c(2,4))
+hist(jura_tot$Cd)
+hist(jura_tot$Co)
+hist(jura_tot$Cr)
+hist(jura_tot$Cu)
+hist(jura_tot$Ni)
+hist(jura_tot$Pb)
+hist(jura_tot$Zn)
+```
+5. Plot the seven heavy metal concentrations as functions of the landuse
+```{r,eval=T, fig.align="center", fig.height=3.5, fig.width=5}
+par(mfrow=c(2,4))
+plot(jura_tot$Landuse, jura_tot$Cd, ylab="Cd")
+plot(jura_tot$Landuse, jura_tot$Co, ylab="Co")
+plot(jura_tot$Landuse, jura_tot$Cr, ylab="Cr")
+plot(jura_tot$Landuse, jura_tot$Cu, ylab="Cu")
+plot(jura_tot$Landuse, jura_tot$Ni, ylab="Ni")
+plot(jura_tot$Landuse, jura_tot$Pb, ylab="Pb")
+plot(jura_tot$Landuse, jura_tot$Zn, ylab="Zn")
+```
+6. Plot the seven heavy metal concentrations as functions of the rocktype
+```{r,eval=T, fig.align="center", fig.height=3.5, fig.width=5}
+par(mfrow=c(2,4))
+plot(jura_tot$Rock, jura_tot$Cd, ylab="Cd")
+plot(jura_tot$Rock, jura_tot$Co, ylab="Co")
+plot(jura_tot$Rock, jura_tot$Cr, ylab="Cr")
+plot(jura_tot$Rock, jura_tot$Cu, ylab="Cu")
+plot(jura_tot$Rock, jura_tot$Ni, ylab="Ni")
+plot(jura_tot$Rock, jura_tot$Pb, ylab="Pb")
+plot(jura_tot$Rock, jura_tot$Zn, ylab="Zn")
+```
+
+## Some statistics
+1. Transform the variables Landuse and Rock into factors (see ?as.factors).
+```{r, echo = T, results = 'hide'}
+jura_tot$Landuse = as.factor(jura_tot$Landuse)
+jura_tot$Rock = as.factor(jura_tot$Rock)
+```
+2. Use the function aov to compute the analysis of variance of the cobalt concentrations with Landuse, Rock and their product as factors. Comment the results.
+```{r, eval = T}
+#Fit the anova model
+aov1.co = aov(Co~Landuse+Rock+Landuse*Rock,data=jura_tot)
+summary(aov1.co)
+```
+If we focus on p-values shown in the summary, we can notice that they are really close to 0 (<0.001). That means that the variable Landuse, Rock, and the product of Landuse and Rock (the combined effect), are usefull to predict the Cobalt concetration (compared to a model that doesn't include these variables). 
+
+3. Do the same on the other concentrations (check the histograms prior to apply a transformation if necessary).
+```{r, echo = T, results = 'hide'}
+# Cd
+aov1.cd = aov(Cd~Landuse+Rock+Landuse*Rock,data=jura_tot)
+summary(aov1.cd)
+aov1.cd = aov(Cd~Landuse,data=jura_tot)
+summary(aov1.cd)
+# Cr
+aov1.cr = aov(Cr~Landuse+Rock+Landuse*Rock,data=jura_tot)
+summary(aov1.cr)
+# Cu
+aov1.cu = aov(Cu~Landuse+Rock+Landuse*Rock,data=jura_tot)
+summary(aov1.cu)
+aov1.cu = aov(Cu~Landuse+Rock,data=jura_tot)
+summary(aov1.cu)
+# Ni
+aov1.ni = aov(Ni~Landuse+Rock+Landuse*Rock,data=jura_tot)
+summary(aov1.ni)
+# Pb
+aov1.pb = aov(Pb~Landuse+Rock+Landuse*Rock,data=jura_tot)
+summary(aov1.pb)
+aov1.pb = aov(Pb~Rock,data=jura_tot)
+summary(aov1.pb)
+# Zn
+aov1.zn = aov(Zn~Landuse+Rock+Landuse*Rock,data=jura_tot)
+summary(aov1.zn)
+```
+Cd doesn't clearly depend on Rock (looking at the plot of Cr depending on Rock). This is shown in the aov with a p-value equal to 0.851 in the model. We can consider a simpler model with only the landuse variable. 
+For Cu, the product factor doesn't seems necessary. We can consider a model without it (p-value=0.24). 
+For Pb, we could ignore the Landuse variable (p-value=0.15, and 0.52 for the product effect). 
+
+
+
+# Utilities
+Load RGeostats.
+
+```{r, echo = T, results = 'hide'}
+library(RGeostats) 
+constant.define("asp",1) #environment variable for the scale ratio between axes
+```
+
+Load the data set and the prediction grid
+
+```{r,echo=T,results='hide'}
+#Adapt it to your folder location
+setwd(working_dir)
+#Data set
+jura_tot = read.csv(paste(working_dir,"jura/jura_pred.csv",sep="/"))
+#Prediction grid
+grid = read.csv("jura/jura_grid.csv")
+```
+
+Coding of the factors
+```{r, echo = T, results = 'hide'}
+jura_tot$Landuse = as.factor(jura_tot$Landuse)
+jura_tot$Rock = as.factor(jura_tot$Rock)
+
+grid$Landuse = as.factor(grid$Landuse)
+grid$Rock = as.factor(grid$Rock)
+```
+
+Change the names of the modalities to be consistent with their names on the grid
+
+```{r, echo = T, results = 'hide'}
+levels(jura_tot$Landuse)
+levels(grid$Landuse)
+levels(jura_tot$Landuse)=c("Forest","Pasture","Meadow","Tillage")
+
+levels(jura_tot$Rock)
+levels(grid$Rock)
+levels(jura_tot$Rock)=c("Argovian","Kimmeridgian","Sequanian","Portlandian","Quaternary")
+```
+
+Separate the data set in two sets : the training set and the validation set.
+For the project, you should use the full data set for the training.
+You submit the prediction on Kaggle for a set of locations on which you only know the locations and the factors.
+
+```{r, echo = T, results = 'hide'}
+set.seed(1234) #Set the seed of the random generators
+
+ntot = nrow(jura_tot)
+ntrain = 200
+nval = ntot - ntrain
+
+indtrain = sample(ntot,ntrain)
+indval = setdiff(1:ntot,indtrain)
+
+jura = jura_tot[indtrain,]
+val_loc = jura_tot[indval,1:4]
+
+#val contains the values to predict. For the project, these values will be on Kaggle
+#(for other locations) and you won't know them
+#You will have the locations and covariables at the unknown locations by the following command :
+
+#val_loc = read.csv("jura/jura_val_loc.csv")
+
+val = cbind(1:nval,jura_tot[indval,]$Co)
+```
+
+RGeostats target grid and utilities for display 
+
+```{r, echo = T, results = 'hide'}
+gridtemp = db.create(grid)
+gridtemp = db.locate(gridtemp,c("Xloc","Yloc"),"x")
+nx = c(length(unique(grid[,1])),length(unique(grid[,2])))
+gridrg = db.grid.init(gridtemp,nodes=nx)
+gridrg = migrate(gridtemp,gridrg,names=4:gridtemp$natt,radix="")
+gridrg = db.rename(gridrg,2:3,c("Xloc","Yloc"))
+gridrg = db.sel(gridrg,!is.na(gridrg[,"Landuse"])&!is.na(gridrg[,"Rock"]))
+
+add.variable =function(var,grid,varname,gridtemp.=gridtemp)
+{
+  tt=db.add(gridtemp.,var)
+  tt=db.rename(tt,tt$natt,varname)
+  grid = migrate(tt,grid,names=tt$natt,radix="")
+  grid
+}
+```
+
+
+# Interpolation exercise
+Provide the maps of the cobalt concentration over the Swiss Jura obtained with several regression/interpolation methods, e.g.:
+
+
+* anova
+* linear regression on the coordinates
+* local polynomial regression
+* Nearest neighbour
+* Inverse distance
+* ...
+
+
+1. Prediction by the mean
+
+```{r,eval=T}
+mean((val[,2]-mean(val[,2]))^2)
+```
+
+2. ANOVA 
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+#Fit the anova model
+aov.co = aov(Co~Landuse+Rock,data=jura)
+summary(aov.co)
+
+#Prediction on the validation locations
+res.aov.val=predict(aov.co,val_loc)
+
+##
+#Compute score 
+mean((res.aov.val-val[,2])^2)
+
+
+#Prediction on the grid
+res.aov=predict(aov.co,grid)
+
+##
+#Add to the RGeostats db and display
+gridrg = add.variable(res.aov,gridrg,"aov.predict")
+plot(gridrg,pos.legend=1)
+```
+
+3. Linear regression of functions of coordinates
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+#Fit the linear model
+
+trend = lm(Co~Xloc+Yloc+Xloc*Yloc+I(Xloc^2)+I(Yloc^2),data=jura)
+summary(trend)
+
+#Prediction on the validation locations
+res.trend.val=predict(trend,val_loc)
+
+##
+#Compute score 
+mean((res.trend.val-val[,2])^2)
+##
+
+#Prediction on the grid
+res.trend=predict(trend,grid)
+
+#Add to the RGeostats db and display
+gridrg = add.variable(res.trend,gridrg,"trend.predict")
+plot(gridrg,pos.legend=1)
+```
+
+4.  N-Nearest neighbours
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+ns =  3 #number of samples to consider for the prediction
+datrg = db.create(jura)
+datrg = db.locate(datrg,2:3,"x")
+datrg = db.locate(datrg,7,"z")
+m = model.create(1)
+neigh=neigh.create(radius=100,nmini=ns,nmaxi=ns)
+
+
+###
+valrg=db.create(val_loc)
+valrg=db.locate(valrg,2:3,"x")
+res.val = kriging(datrg,valrg,m,neigh)
+mean((res.val[,6]-val[,2])^2,na.rm=T)
+###
+
+
+res = kriging(datrg,gridrg,m,neigh)
+plot(res)
+
+```
+
+5. Inverse distance
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+degree = 4
+datrg = db.create(jura)
+datrg = db.locate(datrg,2:3,"x")
+datrg = db.locate(datrg,7,"z")
+
+
+###
+valrg=db.create(val_loc)
+valrg=db.locate(valrg,2:3,"x")
+res.val = invdist(datrg,valrg,exponent = degree)
+mean((res.val[,6]-val[,2])^2)
+
+res = invdist(datrg,gridrg,exponent = degree)
+plot(res)
+
+```
+
+6. Improve the prediction by using other parameterizations for the previous methods.
+
+Let's test for different number of neighbours in the N-Nearest neighbours method : 
+```{r,eval=T}
+# Same begining as N-nearest Neighbours
+m = model.create(1)
+
+nb_max_neigh = 15 #We try the method for 1 to nb_max_neigh neighbours
+score_neigh = rep(0, nb_max_neigh)
+
+for (i in 1:nb_max_neigh) {
+  neigh=neigh.create(radius=100,nmini=i,nmaxi=i)
+  res.val.neigh = kriging(datrg,valrg,m,neigh)
+  score_neigh[i] = mean((res.val.neigh[,6]-val[,2])^2,na.rm=T) # score mean MSE
+}
+(resultat_neigh = data.frame(Deg=1:nb_max_neigh, Score=score_neigh))
+```
+The best score is obtained while considering 4 neighbours in the method. 
+
+And now for different degrees in the inverse distance method : 
+```{r,eval=T}
+# Same begining as Inverse Distance
+deg_min = 1
+deg_max = 10
+score_invd = rep(0, deg_max-deg_min+1)
+
+for (degree in deg_min:deg_max) {
+  res.val_invd = invdist(datrg,valrg,exponent = degree)
+  score_invd[degree-deg_min+1] = mean((res.val_invd[,6]-val[,2])^2)
+}
+
+(resultat_invd = data.frame(Deg=seq(deg_min, deg_max), Score=score_invd))
+```
+The best score is obtained while considering a degree equal to 5 in the method. 
+
+7. Use other methods (Local Polynomial Regression, Random Forests, ...).
+
+A way to probably improve the prediction could be to iterate N predictions on multiple subset of the training data. We iterate N times the folowing process :  
+Among the 200 trainig data, we choose randomly 150 data to train. And we test a prediction score on the 50 others. Then, we predict a cobalt concentration on the 59 validation data. 
+At the end of the N iterations, we get N predictions on the validation data and a score for each prediction, calculated on the 50 random "validation" data from the trainig subset. 
+Finally, to obtain 1 prediction on the 59 validation data, we compute a mean of the N predictions, with a weight corresponding to 1/score (the score is the MSE of the prediction on the 50 "validation" data).
+
+```{r,echo=T,fig.align="center",fig.height=3.5,fig.width=5}
+nbr_iter = 200 #Number N of iterations
+degree = 3  #Degree tested with the inverse distance method
+scores = rep(0, nbr_iter) #Will contain the 100 scores of prediction on subset "validation" data
+all_pred = data.frame(Num_point = 1:59) #Will contain the 100 prediction of the 59 validation data
+
+nsub_train = 160
+nsub_val = ntrain-nsub_train
+
+for (num_iter in 1:nbr_iter) {
+  #Random choice of subsets "validation" and training
+  set.seed(num_iter)
+  indsub_train = sample(ntrain,nsub_train)
+  indsub_val = setdiff(1:ntrain,indsub_train)
+  jura_subtr = jura[indsub_train,]
+  valsub_loc = jura[indsub_val,1:4]
+  valsub = data.frame(1:nsub_val,jura[indsub_val,]$Co)
+  #Training
+  sub_datrg = db.create(jura_subtr)
+  sub_datrg = db.locate(sub_datrg,2:3,"x")
+  sub_datrg = db.locate(sub_datrg,7,"z")
+  #Validation
+  sub_valrg=db.create(valsub_loc)
+  sub_valrg=db.locate(sub_valrg,2:3,"x")
+  #Fit for the test
+  invd_pred = invdist(sub_datrg,sub_valrg,exponent = degree)
+  pred_test = invd_pred[,6]
+  # Fit for the validation data
+  sub_valrg_tot=db.create(val_loc)
+  sub_valrg_tot=db.locate(sub_valrg_tot,2:3,"x")
+  invd_pred_tot = invdist(sub_datrg,sub_valrg_tot,exponent = degree)
+  pred_num_iter = invd_pred_tot[,6]
+  # Score on subset "validation" data
+  scores[num_iter] = mean((pred_test-valsub[,2])^2)
+  # Prediction with this iteration 
+  all_pred[, paste("Pred",as.character(num_iter))] = pred_num_iter
+}
+
+prediction = rep(0, nrow(val_loc))
+for (i in 1:nrow(val_loc)) {
+  prediction[i] = weighted.mean(all_pred[i,-1], 1/scores/sum(1/scores))
+}
+
+mean((prediction-val[,2])^2)
+
+res = invdist(datrg,gridrg)
+plot(res)
+
+set.seed(1234) # reset the seed to 1234
+
+```
+The prediction doesn't seems really better than the method with a single iteration on all the training data...
+
+\textbf{Random Forest :}
+
+We implement a random forest regression algorithm : 
+```{r,eval=T}
+library(randomForest)
+fit <- randomForest(Co ~ Xloc+Yloc+Landuse+Rock, data = jura)
+res.rf = predict(fit, val_loc)
+mean((res.rf-val[,2])^2)
+```
+The result obtained is good compared to the other predictors. The mean squared error on the test set is arround 5.5. We can try to adjust the hyper parameters like the number of trees computed and the number of nodes of the trees with parameters ntree, nodesize and maxnodes but the result remains similar.
+
+
+# Univariate analysis
+
+## Variography
+
+### Experimental variogram (isotropic case)
+
+1. Compute and plot the experimental variogram of the cobalt concentration (using `vario.calc()`). Try different values of lag and comment the results.
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+jurarg = db.create(jura)
+jurarg = db.locate(jurarg,c("Xloc","Yloc"),"x")
+jurarg = db.locate(jurarg,"Co","z")
+
+vario_geos = vario.calc(jurarg)
+plot(vario_geos, type="p")
+
+vario_geos2 = vario.calc(jurarg, nlag=5) #With 5 intervals
+plot(vario_geos2, type="p")
+vario_geos3 = vario.calc(jurarg, nlag=50)  #With 50 intervals
+plot(vario_geos3, type="p")
+vario_geos4 = vario.calc(jurarg, nlag=300)  #With 300 intervals
+plot(vario_geos4, type="p")
+```
+The more points we have in the variogram (low lags and high nlag), the less smooth the variogram is. 
+Having less points implies that we have a smoother scatter plot, but we loose the variability of the information (especially for the nugget effect, which is crucial to evaluate the behavior at short distances). The number of lag is a trade-off between accuracy and complexity of the variogram. The default setting seems to be convenient. 
+
+2. Print the number of pairs of points used to compute the variogram values (using the options `npairpt=TRUE,npairdw=TRUE` in `plot()`) for different values of lag and comment the results.
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+plot(vario_geos, type="p", npairpt=TRUE, npairdw=TRUE)
+```
+We don't have as many points in the really short distances as in longer distances. That's a problem to evaluate precisely the behavior at short distances, linked with the nugget effect. This issue is hard to tackle and we could consider that there are still a good number of points in the mean of the first point in the variogram. 
+
+### Experimental variogram (anisotropic case)
+
+1. Compute and plot the variogram maps (using `vmap.calc()`) the Cobalt concentration order to check for anisotropies. Comment
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+vmap=vmap.calc(jurarg)
+plot(vmap.calc(jurarg))
+```
+The map doesn't show a clear pattern depending on the direction. It's close to a central symetry.
+We can still notice a slight difference by looking at 45° from the horizontal (the colors are slightly darker). A slight difference appears at 135° (the colors are lighter). 
+But globally, the map seems to be quite independant from the direction. 
+
+2. Compute and plot directional variograms (according to the anisotropy directions determined with the maps).
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+vdir = vario.calc(jurarg, nlag=10, dir=c(0,45,90,135))
+plot(vdir, type='l', pos.legend=7)
+```
+This directional variograms confirms what we could see on the map. The anisotropy is light. We don't see a clear tendency like if the curve of one direction was always greater that all the others. 
+
+### Model adjustement
+
+The function `melem.name()` gives the models available in RGeostats.
+
+1. Adjust a model using the function model.auto() (isotropic and anisotropic cases) on experimental variograms and print the model caracteristics.
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+m_iso=model.auto(vario_geos,struct=c(1,2))
+m_iso
+
+m_anisotropic=model.auto(vdir,struct=c(1,2,3,4))
+m_anisotropic
+```
+
+The first model fitting is done with exponential and nugget effect models. For the anistropic model, we also allow spherical and gaussian models.
+
+2. Try imposing different structures or combinations of structures.
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+m=model.auto(vario_geos)
+m
+```
+With all models available, the only chosen is the exponential model.
+It seems like we better use it in our final model. We will compare the performance of different models with the mean sqared error of predictions.
+
+3. Compare the models adjusted on the experimental variogram and the variogram map (using vmap.auto()).
+
+```{r,eval=F}
+vmap.auto(vmap)
+```
+
+## Prediction
+
+### Ordinary Kriging
+
+1. Compute and plot the ordinary kriging of the cobalt over the prediction grid. Plot the associated standard deviation map.
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+#Data preparation
+gridrg = db.grid.init(gridtemp,nodes=nx)
+gridrg = migrate(gridtemp,gridrg,names=4:gridtemp$natt,radix="")
+gridrg = db.rename(gridrg,2:3,c("Xloc","Yloc"))
+gridrg = db.sel(gridrg,!is.na(gridrg[,"Landuse"])
+                &!is.na(gridrg[,"Rock"]))
+
+val_locrg = db.create(val_loc)
+val_locrg=db.locate(val_locrg,c("Xloc","Yloc"),"x")
+val_locrg = db.locate(val_locrg,"Co","z")
+
+#Kriging on grid and val
+neigh = neigh.create(type = 0)# nmini=3, nmax = 15,radius = 100)
+res=kriging(jurarg,gridrg,m,neigh)
+plot(res,sub="std on Kriging of Co", name='Kriging.Co.stdev')
+plot(res, sub="Kriging of Co")
+
+res_val=kriging(jurarg,val_locrg,m,neigh)
+mean((res_val[,"Kriging*estim"]-val[,2])^2)
+```
+
+Here, the model is trained on \texttt{jura} and the predictions are done on \texttt{val_loc}, which consists of the 59 remaining entries of \texttt{jura_tot}
+
+2. Try several variogram models (basic structures, anisotropy), and neighborood options. Compute the prediction scores. Comment the results.
+
+```{r,eval=T}
+movingneigh = neigh.create(type = 2, nmini=10, nmax = 90)
+res_val=kriging(jurarg,val_locrg,m,movingneigh)
+mean((res_val[,"Kriging*estim"]-val[,2])^2)
+
+benchneigh = neigh.create(type = 1)
+res_val=kriging(jurarg,val_locrg,m,benchneigh)
+mean((res_val[,"Kriging*estim"]-val[,2])^2)
+```
+Those two neighborhood systems give similar results for the ordinary kriging.
+Let's change the model this time, sticking with the unique neighborhood system
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+res_val=kriging(jurarg,val_locrg,m_anisotropic,neigh)
+mean((res_val[,"Kriging*estim"]-val[,2])^2)
+
+m1 = model.auto(vario_geos,struct=c(1,5,4,7,8))
+res_val=kriging(jurarg,val_locrg,m1,neigh)
+mean((res_val[,"Kriging*estim"]-val[,2])^2)
+```
+
+The anisotropic model does not perform very well compared to the isotropic one.
+The predictions are better when we don't use the exponential model in fact. A good combination seems to be nugget, spherical, gaussian, cubic, J-Bessel and K-Bessel. We have a MSE of 7.03 on the validation set.
+
+### Universal kriging
+
+Use the indicators of the different levels of the factors (*Rock* and *Landuse*) as covariates to compute the universal kriging prediction. 
+
+Transformation of the Rock factor into indicators
+
+```{r,echo=T,results='hide'}
+indiccut.rock = limits.create(mini=c(1,2,3),maxi=c(2,3,4))
+indiccut.landuse =limits.create(mini=c(1,2),maxi=c(2,3))
+
+jurarg_KU=db.indicator(jurarg,indiccut.rock,name="Rock")
+jurarg_KU=db.indicator(jurarg_KU,indiccut.landuse,name="Landuse")
+jurarg_KU = db.locate(jurarg_KU,"Indicator*","f")
+jurarg_KU = db.locate(jurarg_KU,"Co","z")
+
+gridrg_KU=db.indicator(gridrg,indiccut.rock,name="Rock")
+gridrg_KU=db.indicator(gridrg_KU,indiccut.landuse,name="Landuse")
+gridrg_KU = db.locate(gridrg_KU,"Indicator*","f")
+gridrg_KU = db.locate(gridrg_KU,"Co","z")
+
+val_locrg_KU=db.indicator(val_locrg,indiccut.rock,name="Rock")
+val_locrg_KU=db.indicator(val_locrg_KU,indiccut.landuse,
+                          name="Landuse")
+val_locrg_KU = db.locate(val_locrg_KU,"Indicator*","f")
+val_locrg_KU = db.locate(val_locrg_KU,"Co","z")
+
+jurarg_KU = db.locate(jurarg_KU,c(16,17))
+gridrg_KU = db.locate(gridrg_KU,c(10,11))
+val_locrg_KU = db.locate(val_locrg_KU,c(9,10))
+```
+
+Variogram of the residuals
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+drift = c("1","f1","f2","f3")
+vres = vario.calc(jurarg_KU,nlag=10,uc=drift)
+v = vario.calc(jurarg,nlag=12)
+plot(v)
+plot(vres,add=T,col=2)
+mres=model.auto(vres,struct=c(1,2))
+mres1 =model.auto(vres,struct=c(1,5,4,7,8))
+```
+
+Universal kriging on the grid
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+neigh=neigh.create(type=0)
+res_gridKU=kriging(jurarg_KU,gridrg_KU,mres,neigh,uc=drift)
+res_gridKU1=kriging(jurarg_KU,gridrg_KU,mres1,neigh,uc=drift)
+plot(res_gridKU, sub ='with exponential model')
+plot(res_gridKU1, sub =' without exponential model')
+```
+
+Plot the associated standard deviation map.
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+plot(res_gridKU, name='Kriging.Co.stdev', sub='exponential model')
+plot(res_gridKU1, name='Kriging.Co.stdev', sub =' without exponential model')
+```
+
+Universal kriging on the validation set and prediction score
+
+```{r,eval=T}
+res_valKU=kriging(jurarg_KU,val_locrg_KU,mres,neigh,uc=drift)
+mean((res_valKU[,"Kriging*estim"]-val[,2])^2)
+res_valKU1=kriging(jurarg_KU,val_locrg_KU,mres1,neigh,uc=drift)
+mean((res_valKU1[,"Kriging*estim"]-val[,2])^2)
+```
+
+The model that seemed better in the previous section performs very badly here. We can see it on the two plots displayed above: the prediction is too low when far from observations and thus the standard deviation is very high in those areas.
+We keep in mind that the model which includes the exponential model is good and add the Landuse.
+
+1. Add the *Landuse* predictor to the model. 
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+jurarg_KU = db.locate(jurarg_KU,"Indicator*","f")
+gridrg_KU = db.locate(gridrg_KU,"Indicator*","f")
+val_locrg_KU = db.locate(val_locrg_KU, "Indicator*","f")
+drift = c("1","f1","f2","f3", "f4", "f5")
+
+res_gridKU=kriging(jurarg_KU,gridrg_KU,mres,neigh,uc=drift)
+plot(res_gridKU, sub='with Landuse')
+res_valKU=kriging(jurarg_KU,val_locrg_KU,mres,neigh,uc=drift)
+mean((res_valKU[,"Kriging*estim"]-val[,2])^2)
+```
+
+Adding Landuse gives a very good result compared to other ones. The MSE on the validation set is now 6.48, which is the best we got with any type of Kriging so far. 
+
+2. Try several variogram models (basic structures, anisotropy), and neighborood options. Compare the prediction scores. Comment the results.
+
+```{r,eval=T}
+#Different neigborhood systems
+neigh1=neigh.create(type=1, width=3.7)
+res_valKU=kriging(jurarg_KU,val_locrg_KU,mres,neigh1,uc=drift)
+mean((res_valKU[,"Kriging*estim"]-val[,2])^2)
+```
+
+With adjusted width, bench neighborhood gives slightly better results.
+
+```{r,echo=T,fig.align="center",fig.height=3.5,fig.width=5}
+#Different models
+res_gridKU=kriging(jurarg_KU,gridrg_KU,m_anisotropic,neigh1,uc=drift)
+plot(res_gridKU, sub='with Landuse')
+res_valKU=kriging(jurarg_KU,val_locrg_KU,m_anisotropic,neigh1,uc=drift)
+mean((res_valKU[,"Kriging*estim"]-val[,2])^2)
+
+res_gridKU=kriging(jurarg_KU,gridrg_KU,m1,neigh1,uc=drift)
+plot(res_gridKU, sub='with Landuse')
+res_valKU=kriging(jurarg_KU,val_locrg_KU,m1,neigh1,uc=drift)
+mean((res_valKU[,"Kriging*estim"]-val[,2])^2)
+
+res_gridKU=kriging(jurarg_KU,gridrg_KU,mres1,neigh1,uc=drift)
+plot(res_gridKU, sub='with Landuse')
+res_valKU=kriging(jurarg_KU,val_locrg_KU,mres1,neigh1,uc=drift)
+mean((res_valKU[,"Kriging*estim"]-val[,2])^2)
+
+mres2 = model.auto(vres,struct=c(1,6,8))
+res_gridKU=kriging(jurarg_KU,gridrg_KU,mres2,neigh1,uc=drift)
+plot(res_gridKU, sub='with Landuse')
+res_valKU=kriging(jurarg_KU,val_locrg_KU,mres2,neigh1,uc=drift)
+mean((res_valKU[,"Kriging*estim"]-val[,2])^2)
+```
+The last combination gives the best MSE we've got so far on the validation dataset with kriging. The MSE is 5.83.  
+
+*Optional:*
+
+You can do the same with the interaction. Hint: consider the product *Landuse* x *Rock* as a new factor. You will have to group some of the levels so as to have well balanced groups. See the functions *replicates* and *TukeyHSD*.
+
+
+# Multivariate analysis
+## Variography
+
+1. Compute the  empirical directional variograms and covariograms of a carefully chosen (justify) set of variables.
+
+We will first plot the variogram map and then choose the directions accordingly.
+Previously, we already saw that it was good to check the variograms at -10, 35, 80 and 125 deegrees. We do so because we notice a little difference in the variation of axis close to the diagonals of the plot.
+
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+library(ade4)
+library(adegraphics)
+library(rgl)
+
+plot(vmap.calc(jurarg))
+v = vario.calc(jurarg,nlag=12)
+DAT.chem = jura[,5:11]
+
+# Correlation matrix
+round(cor(DAT.chem),2)
+DAT.std =scale(DAT.chem) 
+PCA = dudi.pca(DAT.std,scannf=FALSE,nf=3)
+
+# Correlation circle
+s.corcircle(PCA$co)
+
+#Directional covariograms
+jurarg = db.locate(jurarg,c("Co","Zn","Cu"),"z")
+vdir = vario.calc(jurarg,nlag=10,dir=c(-10,35,80,125))
+plot(vdir)
+```
+
+We chose the variables Zn and Cu because they appear to be the less correlated with Co on the correlation circle. As Pb is well correlated with Cu, we do not need to compute its covariogram with Co, it would be similar to the one of Cu and Co.
+
+What would you conclude about anisotropy ?
+
+The covariograms allow us to conclude that there is a slight anisotropy because the different curves are not exactly matching even for low distances like between 0.5 and 1km.
+
+2. Fit a model (with *model.auto*).
+We will thus use the anisotropic model.
+
+```{r,echo=T,results='hide'}
+m_aniso = model.auto(vdir)
+m_aniso
+```
+## Prediction
+
+1. Interpolate *Co* on the grid using Ordinary Cokriging (function *kriging*) and plot the resulting map as well as the standard deviation map.
+Compute the prediction score.
+
+```{r,echo=T,fig.align="center",fig.height=3.5,fig.width=5}
+neigh = neigh.create(type = 0)
+res = kriging(jurarg,gridrg,m_aniso,neigh)
+plot(res,sub="Cokriging of Co")
+plot(res,sub="Cokriging of Co, std", name='Kriging.Co.stdev')
+
+res_val = kriging(jurarg,val_locrg,m_aniso,neigh)
+mean((res_val[,"Kriging.Co.estim"]-val[,2])^2)
+```
+
+The Cokriging gives a result which is similar to the one we had with Universal Kriging. With a longer time of the calculations compared to Universal Kriging, Ordinary Cokriging is not really worth it.
+
+2. You can also try to implement the universal cokriging (*optional*).
+
+# Maximum Likelihood estimation
+
+1. Compute the maximum likelihood estimator of the parameters of (some of) your favorite univariate model(s) for the Cobalt concentration. In particular, to improve the prediction, add the explanatory variable *Landuse* to the model and estimate its parameters by maximum likelihood. 
+
+```{r,echo=T,results='hide'}
+val_locrg_KU
+jurarg_KU
+gridrg_KU
+
+library(geoR)
+## ___Using only Rock___
+# Convert the data into geoR objects
+jura.geoR_Rock = as.geodata(jurarg_KU[], coords.col = 2:3, data.col = 7,covar.col = 13:15)
+jura.geoR_Rock.grid = as.geodata(gridrg_KU[gridrg_KU$sel,], coords.col = 2:3,covar.col = c(1,7:9))
+jura.geoR_Rock.val = as.geodata(val_locrg_KU[], coords.col = 2:3, covar.col = c(1,6:8))
+plot(jura.geoR_Rock)
+#Create model maximum likelihood (isotropic)
+ml_RockOnly = likfit(jura.geoR_Rock, ini = c(10,0.5), nug = 0.5, trend = trend.spatial(trend = ~Indicator.Rock.1 + Indicator.Rock.2 + Indicator.Rock.3,jura.geoR_Rock))
+summary(ml_RockOnly)
+
+```
+
+Including the Landuse value : 
+
+```{r,echo=T,results='hide'}
+## ___Using Rock and Landuse___
+# Convert the data into geoR objects
+jura.geoR = as.geodata(jurarg_KU[], coords.col = 2:3, data.col = 7,covar.col = 13:17)
+jura.geoR.grid = as.geodata(gridrg_KU[gridrg_KU$sel,], coords.col = 2:3,covar.col = c(1,7:11))
+jura.geoR.val = as.geodata(val_locrg_KU[], coords.col = 2:3, covar.col = c(1,6:10))
+plot(jura.geoR)
+#Create model maximum likelihood (isotropic)
+ml = likfit(jura.geoR, ini = c(10,0.5), nug = 0.5, trend = trend.spatial(trend = ~Indicator.Rock.1 + Indicator.Rock.2 + Indicator.Rock.3 + Indicator.Landuse.1 + Indicator.Landuse.2,jura.geoR))
+summary(ml)
+```
+
+2. Compare the models with and without *Landuse* through a likelihood ratio test.
+```{r,eval=T}
+TRL.R = 2 *(ml$loglik-ml_RockOnly$loglik)
+1-pchisq(TRL.R,2) 
+```
+
+The model obtained with rock and landuse is better than the model with rock only (p-val=0.004).
+
+3. Compute the prediction map and the prediction at the validation locations for each model. Compute the prediction score.
+
+```{r,echo=T,fig.align="center",fig.height=3.5,fig.width=5}
+## ___Using only Rock___
+#Predict on grid and data (using the model)
+k.grid_RockOnly = krige.conv(jura.geoR_Rock,loc = gridrg_KU[gridrg_KU$sel,2:3],krige = krige.control(obj.m=ml_RockOnly,trend.d = trend.spatial(trend = ~Indicator.Rock.1 + Indicator.Rock.2 + Indicator.Rock.3,jura.geoR_Rock), trend.l = trend.spatial(trend = ~Indicator.Rock.1 + Indicator.Rock.2 + Indicator.Rock.3,jura.geoR_Rock.grid)))
+k.val_loc_RockOnly = krige.conv(jura.geoR_Rock,loc = val_loc[,1:2],krige = krige.control(obj.m=ml_RockOnly))
+#Plot the results
+drift_RockOnly = c("1","f1","f2","f3")
+vres_RockOnly = vario.calc(jurarg_KU,nlag=10,uc=drift_RockOnly)
+mres_RockOnly=model.auto(vres_RockOnly,struct=c(1,2))
+to.rgeostats.variogram = function(model.geor,model.rgeostats){
+  # works for an isotropic structure nugget + exponential
+  model.rgeostats@basics[[1]]@sill = as.matrix(model.geor$nugget)
+  model.rgeostats@basics[[2]]@sill = as.matrix(model.geor$sigmasq)
+  model.rgeostats@basics[[2]]@range = 3*model.geor$phi
+  return(model.rgeostats)
+}  # define a function to have a clean plot
+mres_RockOnly = to.rgeostats.variogram(ml_RockOnly,mres_RockOnly)
+neigh=neigh.create(type=0)
+jurarg_KU = db.locate(jurarg_KU,c(16,17))
+gridrg_KU = db.locate(gridrg_KU,c(10,11))
+val_locrg_KU = db.locate(val_locrg_KU,c(9,10))
+res_gridKU_ROnly=kriging(jurarg_KU,gridrg_KU,mres_RockOnly,neigh,uc=drift_RockOnly)
+plot(res_gridKU_ROnly) #PLOT RESULTS (using rock only)
+#Test on validation data
+res_valKU_ROnly=kriging(jurarg_KU,val_locrg_KU,mres_RockOnly,neigh,uc=drift_RockOnly)
+mean((res_valKU_ROnly[,"Kriging*estim"]-val[,2])^2) #PREDICTION SCORE (using rock only)
+```
+
+```{r,echo=T,fig.align="center",fig.height=3.5,fig.width=5}
+## ___Using Rock and Landuse___
+#Predict on grid and data (using the model)
+k.grid = krige.conv(jura.geoR,loc = gridrg_KU[gridrg_KU$sel,2:3],krige = krige.control(obj.m=ml,trend.d = trend.spatial(trend = ~Indicator.Rock.1 + Indicator.Rock.2 + Indicator.Rock.3 + Indicator.Landuse.1 + Indicator.Landuse.2,jura.geoR), trend.l = trend.spatial(trend = ~Indicator.Rock.1 + Indicator.Rock.2 + Indicator.Rock.3 + Indicator.Landuse.1 + Indicator.Landuse.2,jura.geoR.grid)))
+k.val_loc = krige.conv(jura.geoR,loc = val_loc[,1:2],krige = krige.control(obj.m=ml))
+#Plot the results
+drift = c("1","f1","f2","f3","f4","f5")
+jurarg_KU = db.locate(jurarg_KU,"Indicator*","f")
+gridrg_KU = db.locate(gridrg_KU,"Indicator*","f")
+val_locrg_KU = db.locate(val_locrg_KU,"Indicator*","f")
+vres = vario.calc(jurarg_KU,nlag=10,uc=drift)
+mres=model.auto(vres,struct=c(1,2))
+mres = to.rgeostats.variogram(ml,mres)
+neigh=neigh.create(type=0)
+res_gridKU=kriging(jurarg_KU,gridrg_KU,mres,neigh,uc=drift)
+plot(res_gridKU) #PLOT RESULTS (using rock and landuse)
+#Test on validation data
+res_valKU=kriging(jurarg_KU,val_locrg_KU,mres,neigh,uc=drift)
+mean((res_valKU[,"Kriging*estim"]-val[,2])^2) #PREDICTION SCORE (using rock and landuse)
+```
+
+The previous question is concret here : the MSE score of the method using rock only is 7.17 whereas the one using rock and landuse gives a score of 6.48. 
+
+4. Try the **SPBayes** package for the multivariate approach (*optional*)).
+
+# Bayesian (*optional*)
+
+1. To improve the prediction, add the explanatory variables to the model and estimate the posterior distribution of the parameters.
+
+2. The Bayesian approach is available in the multivariate case in the package **SPBayes**. Give it a try!
+
+
+# Conditional simulations
+
+The information threshold for the concentration of cobalt in soils is *12 mg/kg*. 
+
+1. Generate 100 conditional simulations of the Cobalt concentrations over the swiss Jura according to your favorite model. 
+
+Example with the ordinary kriging (where mres is the fitted variogram of the cobalt)
+```{r,echo=T,fig.align="center",fig.height=3.5,fig.width=5}
+res_simu0 = simtub(jurarg_KU,gridrg_KU,mres,neigh,nbsimu=100,nbtuba=1000)
+plot(res_simu0,name="Simu*S1",pos.legend=1)
+plot(jurarg_KU,add=T,col=1)
+```
+
+Simple Kriging :
+```{r,echo=T,fig.align="center",fig.height=3.5,fig.width=5}
+neigh=neigh.create(type=0)
+vres = vario.calc(jurarg_KU,nlag=10,uc=drift)
+mres=model.auto(vres,struct=c(1,2))
+
+mean.temp = db.stat(jurarg_KU,flag.mono=TRUE)
+res_simu1 = simtub(jurarg_KU,gridrg_KU,model=mres,neigh=neigh,nbtuba=1000,
+              nbsimu=100,uc="",mean=mean.temp,seed=1234)
+
+plot(res_simu1,name="Simu*S1",pos.legend=1)
+plot(jurarg_KU,add=T,col=1)
+```
+
+With external drifts
+```{r,echo=T,fig.align="center",fig.height=3.5,fig.width=5}
+drift = c("1","f1","f2","f3","f4","f5")
+res_simu2 = simtub(jurarg_KU,gridrg_KU,model=mres,neigh=neigh,nbtuba=1000,
+              nbsimu=100,uc=drift,mean=mean.temp,seed=1234)
+
+plot(res_simu2,name="Simu*S1",pos.legend=1)
+plot(jurarg_KU,add=T,col=1)
+```
+
+
+2. Compute the mean surface of the area of exceedance as well as its associated centered 95% confidence interval.
+Ordinary kriging: 
+```{r,eval=T}
+# ___SIM 0 = Ordinary kriging___
+# Compute the local area of points
+step_ptsX_simu0 = max(res_simu0[,"Xloc"][-1]-res_simu0[,"Xloc"][-length(res_simu0[,"Xloc"])])
+step_ptsY_simu0 = max(res_simu0[,"Yloc"][-1]-res_simu0[,"Yloc"][-length(res_simu0[,"Yloc"])])
+area_pts_simu0 = step_ptsX_simu0*step_ptsY_simu0
+# surfaces of the area of exceedance in km²
+surf_threshold0 = rep(0,100)
+for (i in 1:100) {
+  surf_threshold0[i] = sum(res_simu0[,paste("Simu.Co.S",as.character(i),sep="")]<12) * area_pts_simu0
+}
+
+(mean_surf_threshold0 = mean(surf_threshold0)) # MEAN in km²
+sorted_surf_threshold0 = sort(surf_threshold0)
+conf_min0 = sorted_surf_threshold0[round(0.05/2*length(sorted_surf_threshold0))]
+conf_max0 = sorted_surf_threshold0[round((1-0.05/2)*length(sorted_surf_threshold0))]
+(conf_int0 = c(conf_min0, conf_max0)) # CONFIDENCE INTERVAL 95% in km²
+```
+
+Simple kriging: 
+```{r,eval=T}
+# ___SIM 1 = Simple kriging___
+# Compute the local area of points
+step_ptsX_simu1 = max(res_simu1[,"Xloc"][-1]-res_simu1[,"Xloc"][-length(res_simu1[,"Xloc"])])
+step_ptsY_simu1 = max(res_simu1[,"Yloc"][-1]-res_simu1[,"Yloc"][-length(res_simu1[,"Yloc"])])
+area_pts_simu1 = step_ptsX_simu1*step_ptsY_simu1
+# surfaces of the area of exceedance in km²
+surf_threshold1 = rep(0,100)
+for (i in 1:100) {
+  surf_threshold1[i] = sum(res_simu1[,paste("Simu.Co.S",as.character(i),sep="")]<12) * area_pts_simu1
+}
+
+(mean_surf_threshold1 = mean(surf_threshold1)) # MEAN in km²
+sorted_surf_threshold1 = sort(surf_threshold1)
+conf_min1 = sorted_surf_threshold1[round(0.05/2*length(sorted_surf_threshold1))]
+conf_max1 = sorted_surf_threshold1[round((1-0.05/2)*length(sorted_surf_threshold1))]
+(conf_int1 = c(conf_min1, conf_max1)) # CONFIDENCE INTERVAL 95% in km²
+```
+
+With external drifts: 
+```{r,eval=T}
+# ___SIM 2 = With external drifts___
+# Compute the local area of points
+step_ptsX_simu2 = max(res_simu2[,"Xloc"][-1]-res_simu2[,"Xloc"][-length(res_simu2[,"Xloc"])])
+step_ptsY_simu2 = max(res_simu2[,"Yloc"][-1]-res_simu2[,"Yloc"][-length(res_simu2[,"Yloc"])])
+area_pts_simu2 = step_ptsX_simu2*step_ptsY_simu2
+# surfaces of the area of exceedance in km²
+surf_threshold2 = rep(0,100)
+for (i in 1:100) {
+  surf_threshold2[i] = sum(res_simu2[,paste("Simu.Co.S",as.character(i),sep="")]<12) * area_pts_simu2
+}
+
+(mean_surf_threshold2 = mean(surf_threshold2)) # MEAN in km²
+sorted_surf_threshold2 = sort(surf_threshold2)
+conf_min2 = sorted_surf_threshold2[round(0.05/2*length(sorted_surf_threshold2))]
+conf_max2 = sorted_surf_threshold2[round((1-0.05/2)*length(sorted_surf_threshold2))]
+(conf_int2 = c(conf_min2, conf_max2)) # CONFIDENCE INTERVAL 95% in km²
+```
+
+
+3. Compute and plot the exceedance probability map. Comment.
+Ordinary Kriging: 
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+data_simu0 = data.frame(X_loc = res_simu0[,"Xloc"],
+                        Y_loc = res_simu0[,"Yloc"])
+for (i in 1:100) {
+  data_simu0[, paste("Simu.Co.S",as.character(i),sep="")] = res_simu0[,paste("Simu.Co.S",as.character(i),sep="")]
+}
+data_simu0[, "Prob_exc"] = apply(data_simu0[,3:102]>12, 1, sum)/100
+
+library(ggplot2)
+ggplot(data=data_simu0, aes(x=X_loc, y=Y_loc, col=Prob_exc)) + geom_point() +
+  scale_color_gradient(low="white", high="red")
+```
+
+Simple kriging: 
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+data_simu1 = data.frame(X_loc = res_simu1[,"Xloc"],
+                        Y_loc = res_simu1[,"Yloc"])
+for (i in 1:100) {
+  data_simu1[, paste("Simu.Co.S",as.character(i),sep="")] = res_simu1[,paste("Simu.Co.S",as.character(i),sep="")]
+}
+data_simu1[, "Prob_exc"] = apply(data_simu1[,3:102]>12, 1, sum)/100
+
+ggplot(data=data_simu1, aes(x=X_loc, y=Y_loc, col=Prob_exc)) + geom_point() +
+  scale_color_gradient(low="white", high="red")
+```
+
+With external drifts: 
+```{r,echo=T,results='hide',fig.align="center",fig.height=3.5,fig.width=5}
+data_simu2 = data.frame(X_loc = res_simu2[,"Xloc"],
+                        Y_loc = res_simu2[,"Yloc"])
+for (i in 1:100) {
+  data_simu2[, paste("Simu.Co.S",as.character(i),sep="")] = res_simu2[,paste("Simu.Co.S",as.character(i),sep="")]
+}
+data_simu2[, "Prob_exc"] = apply(data_simu2[,3:102]>12, 1, sum)/100
+
+ggplot(data=data_simu2, aes(x=X_loc, y=Y_loc, col=Prob_exc)) + geom_point() +
+  scale_color_gradient(low="white", high="red")
+```
+
+# Summary -- Discussion
+
+Our original dataset consists of 259 observations of the concentration of different metals over the Swiss Jura region. The attributes we have about those locations are the Landuse and the Rock type. We wanted to predict the concentration of Cobatl (Co) over the whole region and more especially at 100 new locations. For that, we had to create a model trained on the known values. To evaluate the model, we split the dataset into two subsets : a 200 rows set called the training set and a 59 observations set, which is the validation set. The metric we used is the mean squared error of our prediction compared to the real value.
+In the objective of predicting the Co concentration given our 259 observations, we have tried several methods. We can separate those methods into two categories: regression and interpolation.
+
+The simplest methods we've tried in first approach were regressions methods. We can name Linear regression and Anova. They did not give very good results compared to the one we were later able to get.
+We then tried simple interpolation methods like the N-nearest-neighbors method and the inverse distance method. Both use the closest observations we have to predict a value at a point. We tuned the parameters of the model such as the number of neighbors or the degree of the distance to improve the prediction score. The best we got for the validation set is the N-nearest-neighbors with two neighbors. However, this model didn't perform really well on the 100 values of Kaggle. We can assume that this choice of parameter is an over fitting on the original dataset.
+A random forest model was also implemented. It gave very good results on the validation set which turned out to be the best we got over the whole week on Kaggle public leaderboard. Fine tuning the parameters such as the number of trees, the maximum depth of a tree or the number of observations per leaf of a tree did not improve the score significantly.
+
+The next thing we tried involved calculating variograms on the data and fitting a model on this variogram. We were able to set a large number of parameters such as the neighborhood system and the structure of the model (a combination of which classical models it is). The prediction on the validation set or over the whole region was then done using the kriging method. We tried different types of kriging, with several different models each time. The more intricate method, Universal Kriging, using both the rock type and the landuse, gave the lowest mean squared error over all the Kriging attempts. The variogram used to fit the model used the residuals and remained a isotropic one. The neighborhood system was a bench neighborhood and we cautiously tuned the width in order to minimize the MSE on the validation set.
+
+We also worked on multivariate analysis. We computed the directional covariograms of Co with Zn and Cu. We chose those variables according to the correlation circle : we wanted variables that were not correlated with Co. We noticed a sligh anisotropy and therefore fitted an anisotropic model. The aim of those steps was to predict Co using the cokriging method. We computed Ordinary Cokriging with the anisotropic model. The results it gave were not as good as what we had had with Universal Cokriging. Since Cokriging is more time demanding than Kriging, we concluded it was not worth it.
+
+Maximum Likelihood method using both landuse and rocktype features gave goog results on the validation set and on the public leaderboard. The model was isotropic and used the residuals calculated. We tested and showed that using both landuse and rock instead of rock type only statistically gave a better model.
+
+And finally, we used method based on simulation. By launching several simulations based on prediction from variogram methods, we have estimated probable results, with a more realistic aspect (it doesn't give a smooth results but a more realistic variability).     
+
+
+# Appendix: description of the predictions submitted on kaggle (models, parameters) and corresponding prediction maps.
+
+1. Inverse distance (degree=2)
+```{r,eval=F}
+# IMPORT DATA
+jura_tot = read.csv("jura/jura_pred.csv")
+jura_tot$Landuse = as.factor(jura_tot$Landuse)
+jura_tot$Rock = as.factor(jura_tot$Rock)
+levels(jura_tot$Landuse)=c("Forest","Pasture","Meadow","Tillage")
+levels(jura_tot$Rock)=c("Argovian","Kimmeridgian","Sequanian","Portlandian","Quaternary")
+val_loc_k = read.csv("jura/jura_val_loc.csv")
+val_loc_k$Landuse = as.factor(val_loc_k$Landuse)
+val_loc_k$Rock = as.factor(val_loc_k$Rock)
+levels(val_loc_k$Landuse)=c("Forest","Pasture","Meadow","Tillage")
+levels(val_loc_k$Rock)=c("Argovian","Kimmeridgian","Sequanian","Portlandian","Quaternary")
+
+# MODEL
+invd_degree = 2
+invd_datrg = db.create(jura_tot)
+invd_datrg = db.locate(invd_datrg,2:3,"x")
+invd_datrg = db.locate(invd_datrg,7,"z")
+# PREDICTION ON VAL LOC K
+invd_valrg=db.create(val_loc_k)
+invd_valrg=db.locate(invd_valrg,2:3,"x")
+invd_pred = invdist(invd_datrg,invd_valrg,exponent = invd_degree)
+prediction = invd_pred[,7]
+# PREDICTION ON VAL LOC K
+res_invd = invdist(invd_datrg,gridrg,exponent = invd_degree)
+plot(res_invd)
+
+# CSV EXPORT (if we want it, uncomment the last line)
+to_kaggle = data.frame(1:100,prediction)
+names(to_kaggle) = c('V1','V2')
+#write.csv(to_kaggle,'submission_neigh-2.csv',row.names = F)
+```
+
+2. Inverse distance (degree=2) average on 500 iterations
+```{r,eval=F}
+nbr_train = 50
+invd_degree = 2
+scores = rep(0, nbr_train)
+allPred = data.frame(Num_point = 1:100)
+allPred_grid = data.frame(Num_point = 1:length(gridrg[,"Xloc"]))
+
+for (num_train in 1:nbr_train) {
+  ntot = nrow(jura_tot)
+  ntrain = 200
+  nval = ntot - ntrain
+  indtrain2 = sample(ntot,ntrain)
+  indtval2 = setdiff(1:ntot,indtrain2)
+  jura2 = jura_tot[indtrain2,]
+  val_loc2 = jura_tot[indtval2,1:4]
+  val2 = data.frame(1:nval,jura_tot[indtval2,]$Co)
+  # Training
+  invd_datrg2 = db.create(jura2)
+  invd_datrg2 = db.locate(invd_datrg2,2:3,"x")
+  invd_datrg2 = db.locate(invd_datrg2,7,"z")
+  # Validation
+  invd_valrg2=db.create(val_loc2)
+  invd_valrg2=db.locate(invd_valrg2,2:3,"x")
+  # Fit for test
+  invd_pred2 = invdist(invd_datrg2,invd_valrg2,exponent = invd_degree)
+  pred_test = invd_pred2[,6]
+  # Fit for new val
+  invd_valrg2_tot=db.create(val_loc_k)
+  invd_valrg2_tot=db.locate(invd_valrg2_tot,2:3,"x")
+  invd_pred_tot = invdist(invd_datrg2,invd_valrg2_tot,exponent = invd_degree)
+  pred_num_train = invd_pred_tot[,7]
+  # Fit for grid
+  res_invd_grid = invdist(invd_datrg2,gridrg,exponent = invd_degree)
+  pred_num_train_grid = res_invd_grid[,7]
+  # Score with validation
+  scores[num_train] = mean((pred_test-val2[,2])^2)
+  # This predictions 
+  allPred[, paste("Pred",as.character(num_train))] = pred_num_train
+  allPred_grid[, paste("Pred",as.character(num_train))] = pred_num_train_grid
+}
+
+prediction_val = rep(0, nrow(val_loc_k))
+prediction_grid = rep(0, length(gridrg[,"Xloc"]))
+
+for (i in 1:nrow(val_loc_k)) {
+  prediction_val[i] = weighted.mean(allPred[i,-1], 1/scores/sum(1/scores))
+}
+for (i in 1:length(gridrg[,"Xloc"])) {
+  prediction_grid[i] = weighted.mean(allPred_grid[i,-1], 1/scores/sum(1/scores))
+}
+
+allPred_grid[, "Final_pred"] = prediction_grid
+allPred_grid[, "X_loc"] = gridrg[,"Xloc"]
+allPred_grid[, "Y_loc"] = gridrg[,"Yloc"]
+
+ggplot(data=allPred_grid, aes(x=X_loc, y=Y_loc, col=Final_pred)) + geom_point() +
+  scale_color_gradient(low="white", high="red")
+
+# CSV EXPORT (if we want it, uncomment the last line)
+to_kaggle = data.frame(1:100,prediction_val)
+names(to_kaggle) = c('V1','V2')
+#write.csv(to_kaggle,'submission_invd-mean-2.csv',row.names = F)
+
+```
+
+3. Random Forest
+```{r,eval=F}
+library(randomForest)
+set.seed(1234)
+fit_kaggle = randomForest(Co ~ Xloc+Yloc+Landuse+Rock, data = jura_tot, ntree=100, nodesize=2)
+res.rf_k = predict(fit_kaggle, val_loc_k)
+to_kaggle_rf = data.frame(1:100, res.rf_k)
+
+# CSV EXPORT (if we want it, uncomment the last line)
+names(to_kaggle_rf) = c('V1','V2')
+#write.csv(to_kaggle_rf,'submission_rf.csv',row.names = F)
+```
+
+4. Ordinary kriging
+```{r,eval=F}
+jurarg = db.create(jura)
+jurarg = db.locate(jurarg,c("Xloc","Yloc"),"x")
+jurarg = db.locate(jurarg,"Co","z")
+
+val_locrg = db.create(val_loc)
+val_locrg=db.locate(val_locrg,c("Xloc","Yloc"),"x")
+val_locrg = db.locate(val_locrg,"Co","z")
+
+val_loc_krg = db.create(val_loc_k)
+val_loc_krg=db.locate(val_loc_krg,c("Xloc","Yloc"),"x")
+val_loc_krg = db.locate(val_loc_krg,"Co","z")
+
+v = vario.calc(jurarg,nlag=12)
+m = model.auto(v)
+neigh = neigh.create(type = 0)
+
+res_kriging_kaggle=kriging(jurarg,val_loc_krg,m,neigh) 
+to_kaggle_okriging = data.frame(1:100,res_kriging_kaggle[,7])
+
+# CSV EXPORT (if we want it, uncomment the last line)
+names(to_kaggle_okriging) = c('V1','V2')
+#write.csv(to_kaggle_okriging,'submission_ordinarykriging.csv',row.names = F)
+```
+
+5. Universal Kriging
+```{r,eval=F}
+indiccut.rock = limits.create(mini=c(1,2,3),maxi=c(2,3,4))
+indiccut.landuse =limits.create(mini=c(1,2),maxi=c(2,3))
+
+jurarg_KU=db.indicator(jurarg,indiccut.rock,name="Rock")
+jurarg_KU=db.indicator(jurarg_KU,indiccut.landuse,name="Landuse")
+jurarg_KU = db.locate(jurarg_KU,"Indicator*","f")
+jurarg_KU = db.locate(jurarg_KU,"Co","z")
+
+gridrg_KU=db.indicator(gridrg,indiccut.rock,name="Rock")
+gridrg_KU=db.indicator(gridrg_KU,indiccut.landuse,name="Landuse")
+gridrg_KU = db.locate(gridrg_KU,"Indicator*","f")
+gridrg_KU = db.locate(gridrg_KU,"Co","z")
+
+val_locrg_KU=db.indicator(val_locrg,indiccut.rock,name="Rock")
+val_locrg_KU=db.indicator(val_locrg_KU,indiccut.landuse,
+                          name="Landuse")
+val_locrg_KU = db.locate(val_locrg_KU,"Indicator*","f")
+val_locrg_KU = db.locate(val_locrg_KU,"Co","z")
+
+val_loc_krgKU=db.indicator(val_loc_krg,indiccut.rock,name="Rock")
+val_loc_krgKU=db.indicator(val_loc_krgKU,indiccut.landuse,
+                          name="Landuse")
+val_loc_krgKU = db.locate(val_loc_krgKU,"Indicator*","f")
+val_loc_krgKU = db.locate(val_loc_krgKU,"Co","z")
+
+drift = c("1","f1","f2","f3", "f4", "f5")
+vres = vario.calc(jurarg_KU,nlag=10,uc=drift)
+mres = model.auto(vres,struct=c(1,6,8))
+neigh1=neigh.create(type=1, width=3.7)
+
+res_valkKU=kriging(jurarg_KU,val_loc_krgKU,mres,neigh1,uc=drift)
+to_kaggle_ukriging = data.frame(1:100,res_valkKU[,12])
+
+# CSV EXPORT (if we want it, uncomment the last line)
+names(to_kaggle_ukriging) = c('V1','V2')
+#write.csv(to_kaggle_ukriging,'submission_universalkriging.csv',row.names = F)
+```
+
+
+6. Maximum likelihood (to see plots of grid, see part 6)
+Using only Rock indicator
+```{r,eval=F}
+## ____PREPARE DATA____
+library(geoR)
+jurarg2ML = db.create(jura_tot)
+jurarg2ML = db.locate(jurarg2ML,c("Xloc","Yloc"),"x")
+jurarg2ML = db.locate(jurarg2ML,"Co","z")
+val_locrg2ML = db.create(val_loc_k)
+val_locrg2ML = db.locate(val_locrg2ML,c("Xloc","Yloc"),"x")
+
+indiccut.rock = limits.create(mini=c(1,2,3),maxi=c(2,3,4))
+indiccut.lu = limits.create(mini=c(1,2),maxi=c(2,3))
+jurarg_KU2ML = db.indicator(jurarg2ML,indiccut.rock,name="Rock")
+jurarg_KU2ML = db.indicator(jurarg_KU2ML,indiccut.lu,name="Landuse")
+jurarg_KU2ML = db.locate(jurarg_KU2ML,"Indicator*","f")
+jurarg_KU2ML = db.locate(jurarg_KU2ML,"Co","z")
+val_locrg_KU2ML=db.indicator(val_locrg2ML,indiccut.rock,name="Rock")
+val_locrg_KU2ML = db.indicator(val_locrg_KU2ML,indiccut.lu,name="Landuse")
+val_locrg_KU2ML = db.locate(val_locrg_KU2ML,"Indicator*","f")
+val_locrg_KU2ML = db.locate(val_locrg_KU2ML,"Co","z")
+
+## ____MODEL MAXIMUM LIKELIHOOD____
+# Convert the data into geoR objects
+jura.geoR_Rock2ML = as.geodata(jurarg_KU2ML[], coords.col = 2:3, data.col = 7,covar.col = 13:15)
+jura.geoR_Rock2ML.val = as.geodata(val_locrg_KU2ML[], coords.col = 2:3, covar.col = c(1,6:8))
+plot(jura.geoR_Rock2ML)
+#Create model maximum likelihood (isotropic)
+ml_RockOnly2 = likfit(jura.geoR_Rock2ML, ini = c(10,0.5), nug = 0.5, trend = trend.spatial(trend = ~Indicator.Rock.1 + Indicator.Rock.2 + Indicator.Rock.3,jura.geoR_Rock2ML))
+summary(ml_RockOnly2)
+#Predict on data (using the model)
+k.val_loc_RockOnly2 = krige.conv(jura.geoR_Rock2ML,loc = val_loc_k[,1:2],krige = krige.control(obj.m=ml_RockOnly2))
+#Plot the results
+drift_RockOnly = c("1","f1","f2","f3")
+jurarg_KU2ML = db.locate(jurarg_KU2ML,c(16,17))
+val_locrg_KU2ML = db.locate(val_locrg_KU2ML,c(9,10))
+vres_RockOnly2 = vario.calc(jurarg_KU2ML,nlag=10,uc=drift_RockOnly)
+mres_RockOnly2=model.auto(vres_RockOnly2,struct=c(1,2))
+to.rgeostats.variogram = function(model.geor,model.rgeostats){
+  # works for an isotropic structure nugget + exponential
+  model.rgeostats@basics[[1]]@sill = as.matrix(model.geor$nugget)
+  model.rgeostats@basics[[2]]@sill = as.matrix(model.geor$sigmasq)
+  model.rgeostats@basics[[2]]@range = 3*model.geor$phi
+  return(model.rgeostats)
+}  # define a function to have a clean plot
+mres_RockOnly2 = to.rgeostats.variogram(ml_RockOnly2,mres_RockOnly2)
+neigh=neigh.create(type=0)
+#Test on validation data
+res_valKU2=kriging(jurarg_KU2ML,val_locrg_KU2ML,mres_RockOnly2,neigh,uc=drift_RockOnly)
+
+prediction=res_valKU2[,"Kriging*estim"]
+
+# CSV EXPORT (if we want it, uncomment the last line)
+to_kaggle = data.frame(1:100,prediction)
+names(to_kaggle) = c('V1','V2')
+#write.csv(to_kaggle,'submission_max-lik-Rock.csv',row.names = F)
+```
+
+Using Rock and Landuse indicator
+```{r,eval=F}
+## ____MODEL MAXIMUM LIKELIHOOD____
+# Convert the data into geoR objects
+jura.geoR2ML = as.geodata(jurarg_KU2ML[], coords.col = 2:3, data.col = 7,covar.col = 13:17)
+jura.geoR2ML.val = as.geodata(val_locrg_KU2ML[], coords.col = 2:3, covar.col = c(1,6:10))
+plot(jura.geoR2ML)
+#Create model maximum likelihood (isotropic)
+ml2 = likfit(jura.geoR2ML, ini = c(10,0.5), nug = 0.5, trend = trend.spatial(trend = ~Indicator.Rock.1 + Indicator.Rock.2 + Indicator.Rock.3 + Indicator.Landuse.1 + Indicator.Landuse.2,jura.geoR2ML))
+summary(ml2)
+#Predict on data (using the model)
+k.val_loc2 = krige.conv(jura.geoR2ML,loc = val_loc_k[,1:2],krige = krige.control(obj.m=ml2))
+#Plot the results
+drift = c("1","f1","f2","f3","f4","f5")
+jurarg_KU2ML = db.locate(jurarg_KU2ML,"Indicator*","f")
+val_locrg_KU2ML = db.locate(val_locrg_KU2ML,"Indicator*","f")
+vres2 = vario.calc(jurarg_KU2ML,nlag=10,uc=drift)
+mres2=model.auto(vres2,struct=c(1,2))
+to.rgeostats.variogram = function(model.geor,model.rgeostats){
+  # works for an isotropic structure nugget + exponential
+  model.rgeostats@basics[[1]]@sill = as.matrix(model.geor$nugget)
+  model.rgeostats@basics[[2]]@sill = as.matrix(model.geor$sigmasq)
+  model.rgeostats@basics[[2]]@range = 3*model.geor$phi
+  return(model.rgeostats)
+}  # define a function to have a clean plot
+mres2 = to.rgeostats.variogram(ml2,mres2)
+neigh=neigh.create(type=0)
+#Test on validation data
+res_valKU2=kriging(jurarg_KU2ML,val_locrg_KU2ML,mres2,neigh,uc=drift)
+
+
+prediction=res_valKU2[,"Kriging*estim"]
+
+
+# CSV EXPORT (if we want it, uncomment the last line)
+to_kaggle = data.frame(1:100,prediction)
+names(to_kaggle) = c('V1','V2')
+#write.csv(to_kaggle,'submission_max-lik-R+LU.csv',row.names = F)
+```
